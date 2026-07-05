@@ -1,3 +1,45 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+flutter_*.png
+*.iml
+*.lock
+**/doc/api/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/flutter_assets/
+**/ios/Pods/
+**/macos/Flutter/ephemeral/
+**/macos/Pods/
+**/windows/flutter/ephemeral/
+**/windows/runner/flutter_windows.dll
+**/linux/flutter/ephemeral/
 
 # FVM Version Cache
 .fvm/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Generated
+**/generated/
+*.freezed.dart
+*.g.dart
+*.gr.dart
+*.gen.dart
+injectable.config.dart
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Assets
+assets/fonts/
