@@ -43,3 +43,16 @@ Thumbs.db
 
 # Assets
 assets/fonts/
+
+# Backend (Python / FastAPI)
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/**/__pycache__/
+backend/**/*.egg-info/
+backend/venv/
+backend/.venv/
+backend/.env
+backend/downloads/
+backend/clips/
+backend/dist/
+backend/build/
