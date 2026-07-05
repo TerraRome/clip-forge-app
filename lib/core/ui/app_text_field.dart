@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../theme/tokens/spacing_tokens.dart';
-import '../theme/extensions/app_theme_extension.dart';
 
 /// Standard text input field for MVP screens.
 /// Uses [ThemeData.inputDecorationTheme] for base styling.

@@ -11,6 +11,7 @@
         "cached_network_image",
         "cupertino_icons",
         "dio",
+        "equatable",
         "flutter",
         "flutter_bloc",
         "flutter_svg",
@@ -1652,6 +1653,14 @@
         "collection",
         "meta",
         "pub_semver"
+      ]
+    },
+    {
+      "name": "equatable",
+      "version": "2.1.0",
+      "dependencies": [
+        "collection",
+        "meta"
       ]
     }
   ],

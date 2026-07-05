@@ -8,6 +8,9 @@ abstract class ProjectRepository {
   /// Get project by ID.
   Future<Project> getProject(String id);
 
+  /// Get recent projects from local storage, newest first.
+  Future<List<Project>> getRecentProjects();
+
   /// Start processing a project.
   Future<Project> startProcessing(String projectId);
 

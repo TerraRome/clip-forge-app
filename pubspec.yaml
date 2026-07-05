@@ -14,6 +14,7 @@ dependencies:
   # State management
   bloc: ^9.0.0
   flutter_bloc: ^9.1.0
+  equatable: ^2.0.7
 
   # Codegen annotations
   freezed_annotation: ^3.0.0
