@@ -56,3 +56,7 @@ backend/downloads/
 backend/clips/
 backend/dist/
 backend/build/
+
+# Video files
+backend/**/*.mp4
+backend/**/*.zip
