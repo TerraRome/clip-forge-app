@@ -54,13 +54,17 @@ class _RenderWorker(BaseWorker):
         for i, hl_data in enumerate(highlights):
             hl = HighlightSegment(hl_data["start"], hl_data["end"], hl_data.get("score", 1.0))
             log.info("step_face_detect", clip=i + 1)
-            face = face_svc.detect_dominant_face(
-                video_path=video_path,
-                highlight_start=hl.start,
-                highlight_end=hl.end,
-                video_width=video_width,
-                video_height=video_height,
-            )
+            try:
+                face = face_svc.detect_dominant_face(
+                    video_path=video_path,
+                    highlight_start=hl.start,
+                    highlight_end=hl.end,
+                    video_width=video_width,
+                    video_height=video_height,
+                )
+            except Exception:
+                log.warning("face_detect_skipped", clip=i + 1, exc_info=True)
+                face = None
             crop_filter = crop_svc.compute_filter(face, video_width, video_height)
             output_path = str(clips_dir / f"clip_{i + 1:02d}.mp4")
             log.info("step_render", clip=i + 1, crop_filter=crop_filter, face_found=face is not None)

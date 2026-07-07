@@ -16,15 +16,19 @@ _MODEL_PATH = str(Path(__file__).parent.parent.parent / "blaze_face_short_range.
 _detector: Optional[FaceDetector] = None
 
 
-def _get_detector() -> FaceDetector:
+def _get_detector() -> Optional[FaceDetector]:
     global _detector
     if _detector is None:
-        opts = FaceDetectorOptions(
-            base_options=BaseOptions(model_asset_path=_MODEL_PATH),
-            running_mode=RunningMode.IMAGE,
-            min_detection_confidence=0.5,
-        )
-        _detector = FaceDetector.create_from_options(opts)
+        try:
+            opts = FaceDetectorOptions(
+                base_options=BaseOptions(model_asset_path=_MODEL_PATH),
+                running_mode=RunningMode.IMAGE,
+                min_detection_confidence=0.5,
+            )
+            _detector = FaceDetector.create_from_options(opts)
+        except Exception:
+            logger.warning("face_detector_init_failed", exc_info=True)
+            return None
     return _detector
 
 
@@ -68,6 +72,10 @@ class FaceService:
             fps = 30.0
 
         detector = _get_detector()
+        if detector is None:
+            logger.warning("face_detector_unavailable")
+            cap.release()
+            return None
         all_faces: list = []
 
         sample_count = max(5, min(int(duration), max_frames))
