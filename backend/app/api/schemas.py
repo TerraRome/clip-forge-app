@@ -2,9 +2,13 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 
+VALID_PRESETS = {"classic", "tiktok_3words", "word_pop", "karaoke"}
+
+
 class CreateProjectRequest(BaseModel):
     youtube_url: str = Field(..., description="YouTube video URL")
     num_clips: int = Field(..., ge=1, le=10, description="Number of clips (1, 3, 5, 10)")
+    subtitle_preset: str = Field("classic", description="Subtitle style: classic, tiktok_3words, word_pop, karaoke")
 
     @field_validator("num_clips")
     @classmethod
@@ -25,11 +29,19 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("Invalid YouTube URL")
         return v
 
+    @field_validator("subtitle_preset")
+    @classmethod
+    def validate_preset(cls, v: str) -> str:
+        if v not in VALID_PRESETS:
+            raise ValueError(f"subtitle_preset must be one of: {', '.join(sorted(VALID_PRESETS))}")
+        return v
+
 
 class ProjectResponse(BaseModel):
     id: str
     youtube_url: str
     num_clips: int
+    subtitle_preset: str = "classic"
     status: str
     error_message: str = ""
     progress: float = 0.0

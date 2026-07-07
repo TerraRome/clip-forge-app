@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import CreateProjectRequest, ProjectResponse, ErrorResponse
+from app.config import settings
 from app.models.project import Project, ProjectStatus
 from app.state import storage
 from app.worker.pipeline import run_pipeline
@@ -20,6 +21,7 @@ async def create_project(body: CreateProjectRequest):
     project = Project.create(
         youtube_url=body.youtube_url,
         num_clips=body.num_clips,
+        subtitle_preset=body.subtitle_preset,
     )
     storage.save(project)
     return _to_response(project)
@@ -77,10 +79,11 @@ async def download_clips(project_id: str):
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for clip_path in project.clip_paths:
-            path = Path(clip_path)
-            if path.exists():
-                zf.write(path, arcname=path.name)
+        clips_dir = Path(settings.downloads_dir) / project_id / "clips"
+        if clips_dir.exists():
+            for clip_path in sorted(clips_dir.iterdir()):
+                if clip_path.suffix == ".mp4":
+                    zf.write(clip_path, arcname=clip_path.name)
 
     zip_buffer.seek(0)
     return StreamingResponse(
@@ -98,6 +101,7 @@ def _to_response(project: Project) -> ProjectResponse:
         id=project.id,
         youtube_url=project.youtube_url,
         num_clips=project.num_clips,
+        subtitle_preset=project.subtitle_preset,
         status=project.status.value,
         error_message=project.error_message,
         progress=project.progress,

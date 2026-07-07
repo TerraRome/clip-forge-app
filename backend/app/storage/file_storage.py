@@ -4,6 +4,7 @@ import json
 import os
 import threading
 from pathlib import Path
+from typing import Optional
 
 from app.config import settings
 from app.models.project import Project
@@ -26,7 +27,7 @@ class FileStorage:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(project.to_dict(), indent=2))
 
-    def get(self, project_id: str) -> Project | None:
+    def get(self, project_id: str) -> Optional[Project]:
         path = self._project_path(project_id)
         if not path.exists():
             return None
@@ -34,7 +35,7 @@ class FileStorage:
             data = json.loads(path.read_text())
             return Project.from_dict(data)
 
-    def update(self, project_id: str, **kwargs) -> Project | None:
+    def update(self, project_id: str, **kwargs) -> Optional[Project]:
         project = self.get(project_id)
         if project is None:
             return None

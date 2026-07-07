@@ -18,7 +18,7 @@ class TranscriptService:
 
     def transcribe(self, audio_path: str) -> list[TranscriptSegment]:
         logger.info("transcribing", audio=audio_path)
-        result = self._model.transcribe(audio_path, language="en")
+        result = self._model.transcribe(audio_path, language="id")
         segments = []
         for seg in result["segments"]:
             text = seg["text"].strip()
