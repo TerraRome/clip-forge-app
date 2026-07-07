@@ -45,6 +45,8 @@ class ProjectResponse(BaseModel):
     status: str
     error_message: str = ""
     progress: float = 0.0
+    task_id: str = ""
+    branch_status: str = "pending"
 
 
 class ErrorResponse(BaseModel):

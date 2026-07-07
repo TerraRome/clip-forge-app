@@ -1,138 +1,95 @@
-from __future__ import annotations
+"""Entry-point Celery task: orchestrate worker-based DAG via link callbacks.
+
+Sequence: audio+video (parallel) → LLM → render → export.
+Each step guarded by flag-files for idempotency.
+Error handling done inside each worker — DAG naturally halts if results missing.
+"""
 
 import structlog
 from pathlib import Path
 
+from app.celery_app import celery_app
 from app.config import settings
 from app.state import storage
-from app.models.project import ProjectStatus
-from app.services.video_service import VideoService
-from app.services.transcript_service import TranscriptService
-from app.services.highlight_service import HighlightService
-from app.services.llm_highlight_service import LLMHighlightService
-from app.services.render_service import RenderService
-from app.services.face_service import FaceService
-from app.services.smart_crop_service import SmartCropService
 
 logger = structlog.get_logger()
 
 
-def run_pipeline(project_id: str) -> None:
+def _pd(project_id: str) -> Path:
+    return Path(settings.downloads_dir) / project_id
+
+
+def _flag(project_id: str, name: str) -> bool:
+    return (_pd(project_id) / f"_{name}").exists()
+
+
+def _set_flag(project_id: str, name: str) -> None:
+    (_pd(project_id) / f"_{name}").touch()
+
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=30, name="pipeline.start")
+def start_pipeline(self, project_id: str) -> dict:
+    """Dispatch audio + video in parallel with link callback."""
     log = logger.bind(project_id=project_id)
     log.info("pipeline_started")
+    storage.update(project_id, progress=2.0)
 
-    video_svc = VideoService()
-    transcript_svc = TranscriptService(model_name=settings.whisper_model)
-    highlight_svc = LLMHighlightService()
-    face_svc = FaceService()
-    crop_svc = SmartCropService()
-    render_svc = RenderService()
+    from app.worker.audio_worker import audio_worker_task
+    from app.worker.video_worker import video_worker_task
 
-    try:
-        project = storage.get(project_id)
-        if project is None:
-            log.error("project_not_found")
-            return
+    audio_worker_task.apply_async(
+        args=[project_id],
+        link=advance_dag.s(project_id),
+    )
+    video_worker_task.apply_async(
+        args=[project_id],
+        link=advance_dag.s(project_id),
+    )
+    return {"project_id": project_id, "status": "started"}
 
-        downloads_dir = Path(settings.downloads_dir)
-        downloads_dir.mkdir(parents=True, exist_ok=True)
-        project_dir = downloads_dir / project_id
-        project_dir.mkdir(parents=True, exist_ok=True)
-        clips_dir = project_dir / "clips"
-        clips_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Download video
-        log.info("step_download")
-        storage.update(project_id, progress=5.0)
-        video_path = str(project_dir / "source.mp4")
-        video_svc.download(project.youtube_url, video_path)
-        storage.update(project_id, progress=20.0)
+@celery_app.task(ignore_result=True, name="pipeline.advance")
+def advance_dag(parent_result, project_id: str) -> None:
+    """Continuation: check flags, dispatch next node."""
+    audio_ready = _flag(project_id, "audio_done")
+    video_ready = _flag(project_id, "video_done")
+    llm_dispatched = _flag(project_id, "llm_dispatched")
+    render_dispatched = _flag(project_id, "render_dispatched")
+    export_dispatched = _flag(project_id, "export_dispatched")
 
-        # 2. Extract audio
-        log.info("step_extract_audio")
-        audio_path = str(project_dir / "audio.wav")
-        video_svc.extract_audio(video_path, audio_path)
-        storage.update(project_id, progress=30.0)
-
-        # 3. Transcribe
-        log.info("step_transcribe")
-        segments = transcript_svc.transcribe(audio_path)
-        storage.update(project_id, progress=50.0)
-
-        # 4. Get video info for dimensions
-        info = video_svc.get_info(video_path)
-        video_stream = _find_video_stream(info)
-        if video_stream is None:
-            raise RuntimeError("No video stream found")
-        video_width = video_stream.get("width", 1920)
-        video_height = video_stream.get("height", 1080)
-        total_duration = float(info.get("format", {}).get("duration", 0))
-
-        # 5. Detect highlights
-        log.info("step_highlights")
-        highlights = highlight_svc.detect(segments, total_duration, project.num_clips)
-        if not highlights:
-            raise RuntimeError("No highlights detected")
-        storage.update(project_id, progress=65.0)
-
-        # 6. Render clips
-        log.info("step_render", clip_count=len(highlights))
-        clip_paths = []
-
-        for i, hl in enumerate(highlights):
-            output_path = str(clips_dir / f"clip_{i + 1:02d}.mp4")
-
-            # Face detection + smart crop
-            log.info("step_face_detect", clip=i + 1)
-            face = face_svc.detect_dominant_face(
-                video_path=video_path,
-                highlight_start=hl.start,
-                highlight_end=hl.end,
-                video_width=video_width,
-                video_height=video_height,
-            )
-            crop_filter = crop_svc.compute_filter(face, video_width, video_height)
-            log.info(
-                "step_render",
-                clip=i + 1,
-                crop_filter=crop_filter,
-                face_found=face is not None,
-            )
-
-            render_svc.render_clip(
-                video_path=video_path,
-                segments=segments,
-                highlight=hl,
-                output_path=output_path,
-                video_width=video_width,
-                video_height=video_height,
-                crop_filter=crop_filter,
-                subtitle_preset=project.subtitle_preset,
-            )
-            clip_paths.append(output_path)
-            progress = 65.0 + (35.0 * (i + 1) / len(highlights))
-            storage.update(project_id, progress=round(progress, 1))
-
-        # 7. Done
-        storage.update(
-            project_id,
-            status=ProjectStatus.DONE,
-            progress=100.0,
-            clip_paths=clip_paths,
+    # 1. Audio + Video → LLM
+    if audio_ready and video_ready and not llm_dispatched:
+        _set_flag(project_id, "llm_dispatched")
+        from app.worker.llm_worker import llm_worker_task
+        storage.update(project_id, branch_status="llm_done")
+        logger.info("dispatching_llm", project_id=project_id)
+        llm_worker_task.apply_async(
+            args=[project_id],
+            link=advance_dag.s(project_id),
         )
-        log.info("pipeline_complete", clips=len(clip_paths))
+        return
 
-    except Exception as e:
-        log.error("pipeline_failed", error=str(e))
-        storage.update(
-            project_id,
-            status=ProjectStatus.ERROR,
-            error_message=str(e),
+    # 2. LLM done → Render
+    llm_ready = _flag(project_id, "llm_done")
+    if llm_ready and not render_dispatched:
+        _set_flag(project_id, "render_dispatched")
+        from app.worker.render_worker import render_worker_task
+        storage.update(project_id, branch_status="rendering")
+        logger.info("dispatching_render", project_id=project_id)
+        render_worker_task.apply_async(
+            args=[project_id],
+            link=advance_dag.s(project_id),
         )
+        return
 
-
-def _find_video_stream(info: dict) -> Optional[dict]:
-    for stream in info.get("streams", []):
-        if stream.get("codec_type") == "video":
-            return stream
-    return None
+    # 3. Render done → Export
+    clips_present = len(list(_pd(project_id).glob("clips/clip_*.mp4"))) > 0
+    if render_dispatched and clips_present and not export_dispatched:
+        _set_flag(project_id, "export_dispatched")
+        from app.worker.export_worker import export_worker_task
+        logger.info("dispatching_export", project_id=project_id)
+        export_worker_task.apply_async(
+            args=[project_id],
+            link=advance_dag.s(project_id),
+        )
+        return

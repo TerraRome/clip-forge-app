@@ -1,7 +1,6 @@
 import os
 import zipfile
 import io
-import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -11,7 +10,7 @@ from app.api.schemas import CreateProjectRequest, ProjectResponse, ErrorResponse
 from app.config import settings
 from app.models.project import Project, ProjectStatus
 from app.state import storage
-from app.worker.pipeline import run_pipeline
+from app.worker.pipeline import start_pipeline
 
 router = APIRouter()
 
@@ -45,8 +44,9 @@ async def process_project(project_id: str):
     project.status = ProjectStatus.PROCESSING
     storage.save(project)
 
-    thread = threading.Thread(target=run_pipeline, args=(project_id,), daemon=True)
-    thread.start()
+    # Submit Celery task instead of spawning thread
+    task = start_pipeline.delay(project_id)
+    storage.update(project_id, task_id=task.id)
 
     return _to_response(project)
 
@@ -105,4 +105,6 @@ def _to_response(project: Project) -> ProjectResponse:
         status=project.status.value,
         error_message=project.error_message,
         progress=project.progress,
+        task_id=project.task_id,
+        branch_status=project.branch_status,
     )

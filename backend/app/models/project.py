@@ -20,6 +20,8 @@ class Project:
     error_message: str = ""
     progress: float = 0.0  # 0.0–100.0
     clip_paths: list[str] = field(default_factory=list)
+    task_id: str = ""  # Celery pipeline task ID
+    branch_status: str = "pending"  # pending/running/audio_done/video_done/llm_done/rendering/done/failed
 
     @staticmethod
     def create(youtube_url: str, num_clips: int, subtitle_preset: str = "classic") -> "Project":
@@ -40,6 +42,8 @@ class Project:
             "error_message": self.error_message,
             "progress": self.progress,
             "clip_paths": self.clip_paths,
+            "task_id": self.task_id,
+            "branch_status": self.branch_status,
         }
 
     @staticmethod
@@ -53,4 +57,6 @@ class Project:
             error_message=data.get("error_message", ""),
             progress=data.get("progress", 0.0),
             clip_paths=data.get("clip_paths", []),
+            task_id=data.get("task_id", ""),
+            branch_status=data.get("branch_status", "pending"),
         )
