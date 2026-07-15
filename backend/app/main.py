@@ -26,7 +26,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI YouTube Clipper", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Klip Backend", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,8 +37,3 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}

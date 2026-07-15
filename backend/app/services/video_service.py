@@ -8,24 +8,24 @@ logger = structlog.get_logger()
 
 
 class VideoService:
-    def download(self, url: str, output_path: str) -> str:
+    def download_clip(self, url: str, output_path: str, start_time: float, end_time: float) -> str:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
+        duration = end_time - start_time
         cmd = [
             "python3", "-m", "yt_dlp",
-            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            "--merge-output-format", "mp4",
+            "--download-sections", f"*{start_time}-{end_time}",
+            "-f", "best[height<=1080]",
             "--ffmpeg-location", settings.ffmpeg_path,
             "--no-warnings",
-            "--extractor-args", "youtube:player_client=android",
             "-o", str(path),
             url,
         ]
         if settings.yt_dlp_cookies_file:
             cmd.extend(["--cookies", settings.yt_dlp_cookies_file])
 
-        logger.info("downloading_video", url=url, output=output_path)
+        logger.info("downloading_clip", url=url, start=start_time, end=end_time, output=output_path)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)
         if result.returncode != 0:
             stderr_lines = [l for l in result.stderr.splitlines()
@@ -37,7 +37,6 @@ class VideoService:
             if err_text:
                 logger.error("download_failed", stderr=err_text)
                 raise RuntimeError(f"yt-dlp failed: {err_text}")
-            logger.warning("download_complete_with_warnings", stderr=result.stderr)
 
         logger.info("download_complete", path=output_path)
         return output_path

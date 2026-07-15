@@ -2,13 +2,8 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
 pydantic>=2.10.0
 pydantic-settings>=2.7.0
-celery>=5.4.0
-redis>=5.2.0
 openai-whisper>=20240930
 yt-dlp>=2024.12.0
-python-multipart>=0.0.20
 structlog>=25.1.0
-# Dev
 ruff>=0.9.0
 mypy>=1.15.0
-aiofiles>=24.1.0

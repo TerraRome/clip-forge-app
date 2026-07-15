@@ -2,20 +2,10 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 
-VALID_PRESETS = {"classic", "tiktok_3words", "word_pop", "karaoke"}
-
-
-class CreateProjectRequest(BaseModel):
+class ClipRequest(BaseModel):
     youtube_url: str = Field(..., description="YouTube video URL")
-    num_clips: int = Field(..., ge=1, le=10, description="Number of clips (1, 3, 5, 10)")
-    subtitle_preset: str = Field("classic", description="Subtitle style: classic, tiktok_3words, word_pop, karaoke")
-
-    @field_validator("num_clips")
-    @classmethod
-    def validate_num_clips(cls, v: int) -> int:
-        if v not in {1, 3, 5, 10}:
-            raise ValueError("num_clips must be 1, 3, 5, or 10")
-        return v
+    start_time: float = Field(..., ge=0, description="Start time in seconds")
+    end_time: float = Field(..., ge=0, description="End time in seconds")
 
     @field_validator("youtube_url")
     @classmethod
@@ -29,24 +19,26 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("Invalid YouTube URL")
         return v
 
-    @field_validator("subtitle_preset")
+    @field_validator("end_time")
     @classmethod
-    def validate_preset(cls, v: str) -> str:
-        if v not in VALID_PRESETS:
-            raise ValueError(f"subtitle_preset must be one of: {', '.join(sorted(VALID_PRESETS))}")
+    def validate_end_time(cls, v: float, info) -> float:
+        start = info.data.get("start_time")
+        if start is not None and v <= start:
+            raise ValueError("end_time must be greater than start_time")
+        if v - (start or 0) > 600:
+            raise ValueError("Maximum clip duration is 600 seconds (10 minutes)")
         return v
 
 
-class ProjectResponse(BaseModel):
-    id: str
-    youtube_url: str
-    num_clips: int
-    subtitle_preset: str = "classic"
-    status: str
-    error_message: str = ""
-    progress: float = 0.0
-    task_id: str = ""
-    branch_status: str = "pending"
+class ClipResponse(BaseModel):
+    title: str
+    clip_path: str
+    subtitle_path: str
+    vtt_path: str
+    transcript_path: str
+    transcript_txt_path: str
+    metadata_path: str
+    duration: float
 
 
 class ErrorResponse(BaseModel):

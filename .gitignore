@@ -50,12 +50,16 @@ backend/**/*.py[cod]
 backend/**/__pycache__/
 backend/**/*.egg-info/
 backend/venv/
+backend/venv*/
 backend/.venv/
 backend/.env
 backend/downloads/
 backend/clips/
 backend/dist/
 backend/build/
+
+# Redis
+dump.rdb
 
 # Video files
 backend/**/*.mp4

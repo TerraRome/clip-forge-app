@@ -1,110 +1,82 @@
+import structlog
 import os
-import zipfile
-import io
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 
-from app.api.schemas import CreateProjectRequest, ProjectResponse, ErrorResponse
+from app.api.schemas import ClipRequest, ClipResponse, ErrorResponse
 from app.config import settings
-from app.models.project import Project, ProjectStatus
-from app.state import storage
-from app.worker.pipeline import start_pipeline
+from app.services.video_service import VideoService
+from app.services.transcript_service import TranscriptService
+from app.services.naming_service import resolve_output_paths
+from app.services.subtitle_formatter import save_subtitles
+from app.services.metadata_service import generate_metadata, save_metadata
 
+logger = structlog.get_logger()
 router = APIRouter()
 
 
-@router.post("/projects", response_model=ProjectResponse, status_code=201)
-async def create_project(body: CreateProjectRequest):
-    project = Project.create(
-        youtube_url=body.youtube_url,
-        num_clips=body.num_clips,
-        subtitle_preset=body.subtitle_preset,
-    )
-    storage.save(project)
-    return _to_response(project)
-
-
 @router.post(
-    "/projects/{project_id}/process",
-    response_model=ProjectResponse,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    "/clip",
+    response_model=ClipResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
-async def process_project(project_id: str):
-    project = storage.get(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if project.status != ProjectStatus.PENDING:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Project is already {project.status.value}",
+async def create_clip(body: ClipRequest):
+    duration = body.end_time - body.start_time
+    log = logger.bind(url=body.youtube_url, start=body.start_time, end=body.end_time)
+
+    try:
+        paths = resolve_output_paths(settings.output_dir, body.youtube_url)
+        log.info("resolved_paths", title=paths["title"])
+
+        log.info("step_download_clip")
+        VideoService().download_clip(body.youtube_url, paths["clip"], body.start_time, body.end_time)
+
+        log.info("step_extract_audio")
+        VideoService().extract_audio(paths["clip"], paths["wav"])
+
+        log.info("step_transcribe")
+        ts = TranscriptService(model_name=settings.whisper_model)
+        segments = ts.transcribe(paths["wav"])
+
+        log.info("step_save_transcript")
+        ts.save_transcript(segments, paths["transcript_json"], paths["transcript_txt"])
+
+        log.info("step_save_subtitles")
+        save_subtitles(segments, paths["srt"], paths["vtt"])
+
+        log.info("step_save_metadata")
+        metadata = generate_metadata(
+            youtube_url=body.youtube_url,
+            title=paths["title"],
+            start_time=body.start_time,
+            end_time=body.end_time,
+            duration=duration,
+            clip_path=paths["clip"],
+            segments=segments,
+        )
+        save_metadata(metadata, paths["metadata"])
+
+        log.info("step_cleanup_wav")
+        Path(paths["wav"]).unlink(missing_ok=True)
+
+        log.info("clip_complete")
+        return ClipResponse(
+            title=paths["title"],
+            clip_path=paths["clip"],
+            subtitle_path=paths["srt"],
+            vtt_path=paths["vtt"],
+            transcript_path=paths["transcript_json"],
+            transcript_txt_path=paths["transcript_txt"],
+            metadata_path=paths["metadata"],
+            duration=duration,
         )
 
-    project.status = ProjectStatus.PROCESSING
-    storage.save(project)
-
-    # Submit Celery task instead of spawning thread
-    task = start_pipeline.delay(project_id)
-    storage.update(project_id, task_id=task.id)
-
-    return _to_response(project)
+    except Exception as e:
+        log.error("clip_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get(
-    "/projects/{project_id}",
-    response_model=ProjectResponse,
-    responses={404: {"model": ErrorResponse}},
-)
-async def get_project(project_id: str):
-    project = storage.get(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return _to_response(project)
-
-
-@router.get(
-    "/download/{project_id}",
-    responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}},
-)
-async def download_clips(project_id: str):
-    project = storage.get(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if project.status != ProjectStatus.DONE:
-        raise HTTPException(
-            status_code=400,
-            detail="Clips not ready yet",
-        )
-
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        clips_dir = Path(settings.downloads_dir) / project_id / "clips"
-        if clips_dir.exists():
-            for clip_path in sorted(clips_dir.iterdir()):
-                if clip_path.suffix == ".mp4":
-                    zf.write(clip_path, arcname=clip_path.name)
-
-    zip_buffer.seek(0)
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{project_id}.zip"',
-            "Content-Length": str(zip_buffer.getbuffer().nbytes),
-        },
-    )
-
-
-def _to_response(project: Project) -> ProjectResponse:
-    return ProjectResponse(
-        id=project.id,
-        youtube_url=project.youtube_url,
-        num_clips=project.num_clips,
-        subtitle_preset=project.subtitle_preset,
-        status=project.status.value,
-        error_message=project.error_message,
-        progress=project.progress,
-        task_id=project.task_id,
-        branch_status=project.branch_status,
-    )
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
